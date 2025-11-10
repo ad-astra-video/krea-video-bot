@@ -1,0 +1,3 @@
+[submodule "krea-realtime-video"]
+	path = runner/krea-realtime-video
+	url = https://github.com/krea-ai/realtime-video.git
