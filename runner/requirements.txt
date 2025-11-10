@@ -1,0 +1,3 @@
+git+https://github.com/livepeer/pytrickle.git
+opencv-python-headless
+flash_attn --no-build-isolation

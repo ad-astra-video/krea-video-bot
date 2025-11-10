@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <meta name="description" content="AI-powered real-time video generation with 80s retro aesthetics">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="scan-lines">
+    <div class="app">
+        <div class="header">
+            <h1 class="title">KREA REALTIME GENERATOR</h1>
+            <div class="connection-status <%= isConnected ? 'connected' : 'disconnected' %>">
+                <span class="status-dot"></span>
+                <%= isConnected ? 'CONNECTED' : 'DISCONNECTED' %>
+            </div>
+        </div>
+        
+        <div class="main-container">
+            <div class="video-section">
+                <div class="video-container">
+                    <% if (currentFrame) { %>
+                        <img id="video-frame" 
+                             src="<%= currentFrame %>" 
+                             alt="Real-time video frame"
+                             class="video-player" 
+                             style="width: 100%; height: 100%; object-fit: cover;">
+                    <% } else if (currentVideo) { %>
+                        <video id="video-player"
+                               controls
+                               autoplay
+                               loop
+                               muted
+                               class="video-player">
+                            <source src="<%= currentVideo %>" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                    <% } else { %>
+                        <div class="video-placeholder">
+                            <div class="placeholder-text">
+                                <div class="loading-animation">▓▓▓</div>
+                                WAITING FOR CONTENT
+                            </div>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h2>STREAM OF CONSCIOUSNESS</h2>
+                </div>
+                
+                <div class="messages-container" id="messages-container">
+                    <% if (messages.length === 0) { %>
+                        <div class="no-messages">
+                            <div class="loading-animation">▓▓▓</div>
+                            WAITING FOR STREAM...
+                        </div>
+                    <% } else { %>
+                        <% messages.forEach(function(message) { %>
+                            <div class="message message-<%= message.type %>">
+                                <div class="message-header">
+                                    <span class="message-icon"><%= helpers.getMessageIcon(message.type) %></span>
+                                    <span class="message-type"><%= message.type.toUpperCase() %></span>
+                                    <span class="message-time"><%= helpers.formatTimestamp(message.timestamp) %></span>
+                                </div>
+                                <div class="message-content">
+                                    <%= message.content %>
+                                </div>
+                            </div>
+                        <% }); %>
+                    <% } %>
+                    <div id="messages-end"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manual generation form -->
+        <div class="controls">
+            <form id="generate-form" class="generate-form">
+                <input type="text" 
+                       id="prompt-input" 
+                       placeholder="Enter custom prompt..." 
+                       maxlength="500">
+                <button type="submit">GENERATE</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- WebSocket connection and real-time updates -->
+    <script>
+        // Helper functions for template
+        function getMessageIcon(type) {
+            switch (type) {
+                case 'thought': return '🧠';
+                case 'prompt': return '✨';
+                case 'video_generation': return '🎬';
+                case 'error': return '⚠️';
+                default: return '💭';
+            }
+        }
+
+        function formatTimestamp(timestamp) {
+            return new Date(timestamp).toLocaleTimeString();
+        }
+
+        // WebSocket connection
+        const wsUrl = '<%= wsUrl %>';
+        let ws = null;
+        let reconnectInterval = null;
+
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    updateConnectionStatus(true);
+                    if (reconnectInterval) {
+                        clearInterval(reconnectInterval);
+                        reconnectInterval = null;
+                    }
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('Error parsing WebSocket message:', error);
+                    }
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket disconnected');
+                    updateConnectionStatus(false);
+                    if (!reconnectInterval) {
+                        reconnectInterval = setInterval(connectWebSocket, 3000);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateConnectionStatus(false);
+                };
+
+            } catch (error) {
+                console.error('Failed to create WebSocket:', error);
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(connectWebSocket, 3000);
+                }
+            }
+        }
+
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'initial_state':
+                    // Handle initial state if needed
+                    break;
+                case 'thought':
+                case 'prompt':
+                case 'video_generation':
+                case 'error':
+                    addMessage(data);
+                    break;
+                case 'frame':
+                    updateVideoFrame(data);
+                    break;
+                case 'waiting_frame':
+                    clearVideoFrame();
+                    break;
+                case 'connection_status':
+                    updateConnectionStatus(data.connected);
+                    break;
+            }
+        }
+
+        function addMessage(data) {
+            const messagesContainer = document.getElementById('messages-container');
+            const noMessages = messagesContainer.querySelector('.no-messages');
+            if (noMessages) {
+                noMessages.remove();
+            }
+
+            const messageEl = document.createElement('div');
+            messageEl.className = `message message-${data.type}`;
+            messageEl.innerHTML = `
+                <div class="message-header">
+                    <span class="message-icon">${getMessageIcon(data.type)}</span>
+                    <span class="message-type">${data.type.toUpperCase()}</span>
+                    <span class="message-time">${formatTimestamp(Date.now())}</span>
+                </div>
+                <div class="message-content">${data.content}</div>
+            `;
+
+            const messagesEnd = document.getElementById('messages-end');
+            messagesContainer.insertBefore(messageEl, messagesEnd);
+            
+            // Auto-scroll to bottom
+            messagesEnd.scrollIntoView({ behavior: 'smooth' });
+            
+            // Keep only last 50 messages
+            const messages = messagesContainer.querySelectorAll('.message');
+            if (messages.length > 50) {
+                messages[0].remove();
+            }
+        }
+
+        function updateVideoFrame(data) {
+            if (data.data && data.data.frameData) {
+                const frameUrl = `data:image/jpeg;base64,${data.data.frameData}`;
+                
+                let frameEl = document.getElementById('video-frame');
+                if (!frameEl) {
+                    // Replace video or placeholder with frame
+                    const container = document.querySelector('.video-container');
+                    container.innerHTML = `
+                        <img id="video-frame" 
+                             src="${frameUrl}" 
+                             alt="Real-time video frame"
+                             class="video-player" 
+                             style="width: 100%; height: 100%; object-fit: cover;">
+                    `;
+                } else {
+                    frameEl.src = frameUrl;
+                }
+            }
+        }
+
+        function clearVideoFrame() {
+            const frameEl = document.getElementById('video-frame');
+            if (frameEl) {
+                const container = document.querySelector('.video-container');
+                container.innerHTML = `
+                    <div class="video-placeholder">
+                        <div class="placeholder-text">
+                            <div class="loading-animation">▓▓▓</div>
+                            WAITING FOR CONTENT
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusEl = document.querySelector('.connection-status');
+            statusEl.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+            statusEl.innerHTML = `
+                <span class="status-dot"></span>
+                ${connected ? 'CONNECTED' : 'DISCONNECTED'}
+            `;
+        }
+
+        // Manual generation form
+        document.getElementById('generate-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const promptInput = document.getElementById('prompt-input');
+            const prompt = promptInput.value.trim();
+            
+            if (!prompt) return;
+            
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                });
+                
+                const result = await response.json();
+                console.log('Generation requested:', result);
+                promptInput.value = '';
+            } catch (error) {
+                console.error('Error requesting generation:', error);
+            }
+        });
+
+        // Initialize WebSocket connection
+        connectWebSocket();
+    </script>
+</body>
+</html>
+
